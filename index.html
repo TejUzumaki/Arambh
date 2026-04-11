@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhySim v2.2 — High Fidelity Physics</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17/dist/lil-gui.umd.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #05080f;
+  --bg-panel: rgba(12, 18, 32, 0.95);
+  --border: rgba(255, 255, 255, 0.1);
+  --accent-cyan: #63caff;
+  --accent-lime: #a8ff78;
+  --accent-orange: #ff9f45;
+  --text-primary: #e8f0fe;
+  --text-muted: rgba(232, 240, 254, 0.7);
+  --font-mono: 'Space Mono', monospace;
+  --font-sans: 'DM Sans', sans-serif;
+  --sidebar-w: 260px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-sans); overflow: hidden; }
+
+/* Background Canvas */
+#bg-particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+#app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: 100vh; width: 100vw; height: 100vh; position: relative; z-index: 1; }
+
+/* Sidebar */
+#sidebar { grid-column: 1; grid-row: 1; background: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 100; backdrop-filter: blur(20px); }
+.sidebar-logo { padding: 24px 20px; border-bottom: 1px solid var(--border); }
+.sidebar-logo h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--accent-cyan); margin-bottom: 4px; }
+.sidebar-logo span { font-size: 11px; color: var(--text-muted); }
+
+.sidebar-section-label { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.15em; text-transform: uppercase; padding: 20px 20px 10px; }
+
+.sim-btn { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; border: none; background: transparent; color: var(--text-muted); width: 100%; text-align: left; font-family: var(--font-sans); font-size: 13px; border-left: 3px solid transparent; transition: all 0.2s; }
+.sim-btn:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+.sim-btn.active { background: rgba(99, 202, 255, 0.08); color: var(--accent-cyan); border-left-color: var(--accent-cyan); }
+.sim-btn .btn-icon { width: 24px; height: 24px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+.sim-btn.active .btn-icon { background: rgba(99, 202, 255, 0.15); color: var(--accent-cyan); }
+
+/* Toggle Overlay Button */
+#toggle-overlay-btn { margin-top: auto; padding: 15px 20px; background: rgba(255,255,255,0.03); border-top: 1px solid var(--border); border: none; color: var(--text-muted); text-align: left; cursor: pointer; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; }
+#toggle-overlay-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+
+/* Main View */
+#main { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; }
+#canvas-container { width: 100%; height: 100%; }
+#top-bar { position: absolute; top: 0; left: 0; right: 0; height: 60px; display: flex; align-items: center; padding: 0 24px; background: linear-gradient(180deg, rgba(5,8,15,0.9) 0%, transparent 100%); z-index: 50; pointer-events: none; }
+#sim-title { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: #fff; }
+#sim-subtitle { margin-left: 10px; font-size: 12px; color: var(--text-muted); }
+
+/* Info Overlay - SCROLLBAR FIX */
+#info-overlay { 
+    position: absolute; 
+    bottom: 24px; left: 24px; 
+    width: 400px; 
+    max-height: calc(100vh - 120px); /* Constrain height */
+    background: rgba(12, 18, 32, 0.9); 
+    backdrop-filter: blur(16px); 
+    border: 1px solid var(--border); 
+    border-radius: 12px; 
+    padding: 20px; 
+    z-index: 50; 
+    overflow-y: auto; /* Enable scrolling */
+    display: block;
+    transition: opacity 0.3s;
+}
+
+#info-overlay.hidden { opacity: 0; pointer-events: none; }
+
+/* CUSTOM VISIBLE SCROLLBAR FOR OVERLAY */
+#info-overlay::-webkit-scrollbar { width: 8px; }
+#info-overlay::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+#info-overlay::-webkit-scrollbar-thumb { background: rgba(99, 202, 255, 0.4); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
+#info-overlay::-webkit-scrollbar-thumb:hover { background: rgba(99, 202, 255, 0.8); }
+
+.overlay-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.overlay-header-title { font-family: var(--font-mono); font-size: 10px; color: var(--accent-cyan); text-transform: uppercase; letter-spacing: 1px; }
+.overlay-body { font-size: 13px; line-height: 1.6; color: var(--text-muted); margin-bottom: 10px; }
+.formula-block { background: rgba(99, 202, 255, 0.08); border-left: 3px solid var(--accent-cyan); padding: 10px 14px; margin: 10px 0; font-family: var(--font-mono); font-size: 11px; color: #dce8f8; border-radius: 0 6px 6px 0; }
+.formula-label { display: block; font-size: 9px; color: var(--accent-lime); text-transform: uppercase; margin-bottom: 4px; }
+
+/* Live Chips */
+#live-values { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.live-chip { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); border-radius: 100px; padding: 4px 12px; font-family: var(--font-mono); font-size: 10px; display: flex; align-items: center; gap: 6px; }
+.live-chip span { color: var(--accent-lime); font-weight: 700; }
+
+/* Energy Bars */
+.energy-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.energy-label { width: 20px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; }
+.energy-track { flex: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+.energy-fill { height: 100%; width: 0%; transition: width 0.1s linear; }
+.energy-val { width: 50px; text-align: right; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+/* GUI STYLING (Fixed Width, Scrollbar) */
+#gui-container { position: absolute !important; top: 70px !important; right: 24px !important; z-index: 200 !important; }
+.lil-gui { 
+    --background-color: rgba(12, 18, 32, 0.95) !important;
+    --text-color: #e8f0fe !important;
+    --title-background-color: #1a2a4a !important;
+    --title-text-color: #63caff !important;
+    --widget-color: rgba(255, 255, 255, 0.1) !important;
+    --hover-color: rgba(255, 255, 255, 0.15) !important;
+    --focus-color: rgba(99, 202, 255, 0.3) !important;
+    --number-color: #a8ff78 !important;
+    --string-color: #ff9f45 !important;
+    --font-family: 'DM Sans', sans-serif !important;
+    --font-size: 12px !important;
+    width: 300px !important; 
+    max-height: calc(100vh - 100px) !important;
+    overflow-y: auto !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5) !important;
+}
+.lil-gui::-webkit-scrollbar { width: 8px; }
+.lil-gui::-webkit-scrollbar-track { background: transparent; }
+.lil-gui::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+.lil-gui .controller { height: 28px; margin-bottom: 2px; }
+.lil-gui .title { height: 36px !important; line-height: 36px !important; font-weight: 700 !important; font-family: 'Space Mono', monospace !important; font-size: 13px !important; }
+
+#transition-overlay { position: absolute; inset: 0; background: var(--bg-deep); z-index: 500; opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+#transition-overlay.active { opacity: 1; pointer-events: all; }
+#pause-indicator { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: var(--accent-orange); color: #000; font-family: var(--font-mono); font-size: 12px; font-weight: 700; padding: 6px 16px; border-radius: 20px; z-index: 60; display: none; box-shadow: 0 0 15px var(--accent-orange); }
+</style>
+</head>
+<body>
+
+<canvas id="bg-particles"></canvas>
+
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidebar-logo">
+      <h1>PhySim v2.2</h1>
+      <span>High Fidelity Physics Lab</span>
+    </div>
+
+    <div class="sidebar-section-label">Waves & Oscillation</div>
+    <button class="sim-btn active" id="btn-wave" onclick="switchSim('wave')">
+      <div class="btn-icon">≈</div>
+      <div class="btn-label">Wave Superposition</div>
+    </button>
+    <button class="sim-btn" id="btn-shm" onclick="switchSim('shm')">
+      <div class="btn-icon">⟳</div>
+      <div class="btn-label">Spring-Mass (SHM)</div>
+    </button>
+    <button class="sim-btn" id="btn-pendulum" onclick="switchSim('pendulum')">
+      <div class="btn-icon">⌒</div>
+      <div class="btn-label">Simple Pendulum</div>
+    </button>
+
+    <div class="sidebar-section-label">Kinematics & Dynamics</div>
+    <button class="sim-btn" id="btn-proj" onclick="switchSim('proj')">
+      <div class="btn-icon">⌒</div>
+      <div class="btn-label">Projectile Motion</div>
+    </button>
+    <button class="sim-btn" id="btn-circ" onclick="switchSim('circular')">
+      <div class="btn-icon">◎</div>
+      <div class="btn-label">Circular Motion</div>
+    </button>
+    <button class="sim-btn" id="btn-coll" onclick="switchSim('collision')">
+      <div class="btn-icon">⇄</div>
+      <div class="btn-label">1D Collisions</div>
+    </button>
+    <button class="sim-btn" id="btn-gravity" onclick="switchSim('gravity')">
+      <div class="btn-icon">◎</div>
+      <div class="btn-label">Orbital Mechanics</div>
+    </button>
+
+    <button id="toggle-overlay-btn" onclick="toggleOverlay()">[H] Toggle Analysis</button>
+  </aside>
+
+  <main id="main">
+    <div id="top-bar">
+      <div id="sim-title">Wave Superposition</div>
+      <div id="sim-subtitle">Real Physics Mode: v = fλ</div>
+    </div>
+    
+    <div id="pause-indicator">PAUSED</div>
+    <div id="canvas-container"></div>
+    <div id="gui-container"></div>
+
+    <!-- Info Overlay with Visible Scrollbar -->
+    <div id="info-overlay">
+      <div class="overlay-header">
+        <div class="overlay-header-title">Physics Analysis</div>
+      </div>
+      <div class="overlay-body" id="overlay-text"></div>
+      <div id="formula-container"></div>
+      <div id="energy-container" style="display:none; margin-top:15px;"></div>
+      <div id="momentum-container" style="display:none; margin-top:15px;"></div>
+      <div id="live-values"></div>
+    </div>
+
+    <div id="transition-overlay"></div>
+  </main>
+</div>
+
+<script>
+/* ================= UTILS & ENGINE ================= */
+var PI = Math.PI, TAU = PI * 2, EPS = 1e-9;
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Background
+(function(){var c=document.getElementById('bg-particles'),ctx=c.getContext('2d'),pts=[];function resize(){c.width=innerWidth;c.height=innerHeight}resize();window.addEventListener('resize',resize);for(var i=0;i<40;i++)pts.push({x:Math.random()*2000,y:Math.random()*2000,vx:(Math.random()-.5)*.1,vy:(Math.random()-.5)*.1,r:Math.random()*1.5});(function draw(){requestAnimationFrame(draw);ctx.clearRect(0,0,c.width,c.height);for(var i=0;i<pts.length;i++){var p=pts[i];p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=c.width;if(p.x>c.width)p.x=0;if(p.y<0)p.y=c.height;if(p.y>c.height)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fillStyle='rgba(99,202,255,0.05)';ctx.fill()}})})();
+
+// Engine
+function LabEngine(id){
+    this.el = document.getElementById(id);
+    this.w = this.el.clientWidth; this.h = this.el.clientHeight;
+    this.activeSim = null;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(this.w, this.h);
+    this.renderer.setClearColor(0x05080f, 1);
+    this.renderer.shadowMap.enabled = true;
+    this.el.appendChild(this.renderer.domElement);
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x05080f, 0.015);
+    this.camera = new THREE.PerspectiveCamera(45, this.w / this.h, 0.1, 1000);
+    this.camera.position.set(0, 10, 30);
+    this.orbit = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+    this.orbit.enableDamping = true;
+    this.orbit.dampingFactor = 0.05;
+    this.scene.add(new THREE.AmbientLight(0x1a2a4a, 1.5));
+    var dir = new THREE.DirectionalLight(0x63caff, 0.8);
+    dir.position.set(10, 20, 10);
+    dir.castShadow = true;
+    this.scene.add(dir);
+    var self = this;
+    window.addEventListener('resize', function(){
+        self.w = self.el.clientWidth; self.h = self.el.clientHeight;
+        self.camera.aspect = self.w / self.h; self.camera.updateProjectionMatrix();
+        self.renderer.setSize(self.w, self.h);
+        if(self.activeSim) self.activeSim.onResize();
+    });
+}
+LabEngine.prototype.loadSim = function(sim){
+    if(this.activeSim) this.activeSim.dispose();
+    this.activeSim = sim;
+    this.activeSim.build(this.scene, this.camera, this.renderer);
+};
+LabEngine.prototype.start = function(){
+    var clock = new THREE.Clock(), self = this;
+    function tick(){
+        requestAnimationFrame(tick);
+        var dt = clock.getDelta(), t = clock.getElapsedTime();
+        if(dt > 0.1) dt = 0.1; 
+        self.orbit.update();
+        if(self.activeSim) self.activeSim.update(t, dt);
+        self.renderer.render(self.scene, self.camera);
+    }
+    tick();
+};
+
+// Base Class
+function SimBase(engine){
+    this.engine = engine; this.scene = null; this.camera = null; this.renderer = null;
+    this.gui = null; this._objs = []; this._st = 0; this._paused = false;
+}
+SimBase.prototype.build = function(scene, camera, renderer){
+    this.scene = scene; this.camera = camera; this.renderer = renderer;
+    this._st = 0; this._paused = false;
+    this._setup();
+    this._buildGui();
+    document.getElementById('energy-container').style.display = 'none';
+    document.getElementById('momentum-container').style.display = 'none';
+    document.getElementById('info-overlay').classList.remove('hidden'); // Ensure visible on switch
+};
+SimBase.prototype._setup = function(){};
+SimBase.prototype._buildGui = function(){};
+SimBase.prototype.update = function(t, dt){ 
+    if(!this._paused) this._st += dt; 
+};
+SimBase.prototype.onResize = function(){};
+SimBase.prototype.reset = function(){ this._st = 0; };
+SimBase.prototype.togglePause = function(){ 
+    this._paused = !this._paused; 
+    document.getElementById('pause-indicator').style.display = this._paused ? 'block' : 'none';
+};
+SimBase.prototype.dispose = function(){
+    for(var i=0; i<this._objs.length; i++){
+        this.scene.remove(this._objs[i]);
+        var o = this._objs[i];
+        if(o.geometry) o.geometry.dispose();
+        if(o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());
+    }
+    this._objs = [];
+    if(this.gui){ this.gui.destroy(); this.gui = null; }
+};
+SimBase.prototype._add = function(obj){ this.scene.add(obj); this._objs.push(obj); return obj; };
+SimBase.prototype._line = function(pts, color, op){
+    var g = new THREE.BufferGeometry().setFromPoints(pts);
+    return new THREE.Line(g, new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: op || 1 }));
+};
+SimBase.prototype._setArr = function(arr, dir, len, pos){
+    if(len < 0.05){ arr.visible = false; return; }
+    arr.visible = true;
+    arr.setDirection(dir);
+    arr.setLength(len, 0.3, 0.2);
+    arr.position.copy(pos);
+};
+
+/* ================= 1. WAVE SUPERPOSITION (FIXED MOVEMENT) ================= */
+function WaveSim(engine){
+    SimBase.call(this, engine);
+    // Increased default freq to 2.0 Hz for immediate visual feedback
+    this.p = { 
+        mode: 'Free', 
+        v: 5.0, f1: 2.0, A1: 1.5, phi1: 0, dir1: 1,
+        f2: 2.0, A2: 1.0, phi2: 0, dir2: 1 
+    };
+    this.N = 400; this.XR = 24;
+}
+WaveSim.prototype = Object.create(SimBase.prototype);
+WaveSim.prototype._setup = function(){
+    var grid = new THREE.GridHelper(32, 32, 0x1a2a4a, 0x111a2e); grid.position.y = -4; this._add(grid);
+    var zs = [3.5, 0, -3.5];
+    for(var i=0; i<3; i++) this._add(this._line([new THREE.Vector3(-this.XR/2,0,zs[i]), new THREE.Vector3(this.XR/2,0,zs[i])], 0x1e2e48, 0.5));
+    var mkG = function(){ var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.N*3), 3)); return g; }.bind(this);
+    this._geoA = mkG(); this._geoB = mkG(); this._geoR = mkG();
+    this._lineA = this._add(new THREE.Line(this._geoA, new THREE.LineBasicMaterial({ color: 0x63caff }))); this._lineA.position.z=3.5;
+    this._lineB = this._add(new THREE.Line(this._geoB, new THREE.LineBasicMaterial({ color: 0xff9f45 }))); this._lineB.position.z=-3.5;
+    this._lineR = this._add(new THREE.Line(this._geoR, new THREE.LineBasicMaterial({ color: 0xa8ff78, linewidth: 2 })));
+    this._areaA = this._mkArea(0x63caff, 0.05, 3.5); this._areaB = this._mkArea(0xff9f45, 0.05, -3.5); this._areaR = this._mkArea(0xa8ff78, 0.1, 0);
+    this._envGeo = mkG(); this._envLine = this._add(new THREE.Line(this._envGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, dashSize: 0.5, gapSize: 0.2 })));
+    this.camera.position.set(0, 10, 28);
+    this._add(this._sprite('Wave 1 (Cyan)', -10, 2.5, 3.5, '#63caff'));
+    this._add(this._sprite('Wave 2 (Orange)', -10, 2.5, -3.5, '#ff9f45'));
+    this._add(this._sprite('Resultant', -10, 2.5, 0, '#a8ff78'));
+};
+WaveSim.prototype._mkArea = function(col, op, z){
+    var N=this.N, pos=new Float32Array(N*2*3), idx=[];
+    for(var i=0; i<N-1; i++) idx.push(i, i+1, i+N, i+1, i+N+1, i+N);
+    var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx);
+    var m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false }));
+    m.position.z = z; return this._add(m);
+};
+WaveSim.prototype._fillArea = function(mesh, fn){
+    var N=this.N, XR=this.XR, pos=mesh.geometry.attributes.position.array;
+    for(var i=0; i<N; i++){
+        var x = (i/(N-1))*XR - XR/2, y = fn(x);
+        var t=i*3, b=(i+N)*3;
+        pos[t]=x; pos[t+1]=y; pos[t+2]=0;
+        pos[b]=x; pos[b+1]=0; pos[b+2]=0;
+    }
+    mesh.geometry.attributes.position.needsUpdate = true;
+};
+WaveSim.prototype._sprite = function(text, x, y, z, color){
+    var c = document.createElement('canvas'); c.width = 300; c.height = 60;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(5,8,15,0.8)'; ctx.roundRect(0,0,300,60,8); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle = color; ctx.font = 'bold 18px "Space Mono"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text, 150, 30);
+    var t = new THREE.CanvasTexture(c);
+    var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true }));
+    s.scale.set(3, 0.66, 1); s.position.set(x,y,z);
+    return s;
+};
+WaveSim.prototype._buildGui = function(){
+    this.gui = new lil.GUI({ title: 'Wave Physics', container: document.getElementById('gui-container'), width: 300 });
+    this.gui.add(this.p, 'mode', ['Free', 'Constructive', 'Destructive', 'Standing', 'Beats']).name('Scenario');
+    var fEnv = this.gui.addFolder('Environment'); fEnv.add(this.p, 'v', 1, 15, 0.1).name('Wave Speed (v)'); fEnv.open();
+    var fA = this.gui.addFolder('Wave 1 (Cyan)'); fA.add(this.p, 'A1', 0, 3, 0.1).name('Amplitude'); fA.add(this.p, 'f1', 0.1, 5, 0.1).name('Freq (Hz)'); fA.add(this.p, 'phi1', 0, TAU, 0.1).name('Phase'); fA.add(this.p, 'dir1', { 'Right': 1, 'Left': -1 }).name('Dir'); fA.open();
+    var fB = this.gui.addFolder('Wave 2 (Orange)'); fB.add(this.p, 'A2', 0, 3, 0.1).name('Amplitude'); fB.add(this.p, 'f2', 0.1, 5, 0.1).name('Freq (Hz)'); fB.add(this.p, 'phi2', 0, TAU, 0.1).name('Phase'); fB.add(this.p, 'dir2', { 'Right': 1, 'Left': -1 }).name('Dir'); fB.open();
+};
+WaveSim.prototype.update = function(t, dt){
+    SimBase.prototype.update.call(this, t, dt); // CRITICAL FIX: Pass t and dt
+    var p = this.p, tm = this._st, mode = p.mode;
+    if(mode === 'Constructive') { p.f2 = p.f1; p.phi2 = p.phi1; p.dir2 = p.dir1; }
+    else if(mode === 'Destructive') { p.f2 = p.f1; p.phi2 = p.phi1 + PI; p.dir2 = p.dir1; }
+    else if(mode === 'Standing') { p.f2 = p.f1; p.dir1 = 1; p.dir2 = -1; p.A2 = p.A1; p.phi2 = 0; }
+    else if(mode === 'Beats') { p.dir2 = p.dir1; if(Math.abs(p.f1-p.f2)<0.1) p.f2 = p.f1 + 0.2; }
+    // Physics derivation
+    var k1 = TAU * p.f1 / p.v, w1 = TAU * p.f1;
+    var k2 = TAU * p.f2 / p.v, w2 = TAU * p.f2;
+    var fnA = (x) => p.A1 * Math.sin(k1 * x - w1 * tm * p.dir1 + p.phi1);
+    var fnB = (x) => p.A2 * Math.sin(k2 * x - w2 * tm * p.dir2 + p.phi2);
+    var fnR = (x) => fnA(x) + fnB(x);
+    // Update Geometry
+    var pA = this._geoA.attributes.position.array, pB = this._geoB.attributes.position.array, pR = this._geoR.attributes.position.array;
+    for(var i=0; i<this.N; i++){
+        var x = (i/(this.N-1))*this.XR - this.XR/2, j=i*3;
+        pA[j]=x; pA[j+1]=fnA(x); pA[j+2]=0;
+        pB[j]=x; pB[j+1]=fnB(x); pB[j+2]=0;
+        pR[j]=x; pR[j+1]=fnR(x); pR[j+2]=0;
+    }
+    this._geoA.attributes.position.needsUpdate = true; this._geoB.attributes.position.needsUpdate = true; this._geoR.attributes.position.needsUpdate = true;
+    this._fillArea(this._areaA, fnA); this._fillArea(this._areaB, fnB); this._fillArea(this._areaR, fnR);
+    // Envelope
+    if(mode === 'Beats'){
+        var env = (x) => 2 * p.A1 * Math.cos(PI*(p.f1-p.f2)*tm);
+        var eP = this._envGeo.attributes.position.array;
+        for(var i=0; i<this.N; i++){ var x = (i/(this.N-1))*this.XR - this.XR/2, j=i*3; eP[j]=x; eP[j+1]=env(x); eP[j+2]=0; }
+        this._envGeo.attributes.position.needsUpdate = true; this._envLine.visible = true;
+    } else { this._envLine.visible = false; }
+    // UI
+    document.getElementById('overlay-text').innerHTML = 'Medium is dispersiveless (constant v).';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block"><div class="formula-label">Derived</div>λ = v/f<br>k = '+k1.toFixed(2)+'</div>';
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'v',v:p.v.toFixed(1)},{l:'f₁',v:p.f1.toFixed(2)},{l:'f₂',v:p.f2.toFixed(2)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= 2. SPRING-MASS (TUBE SPRING) ================= */
+function SHMSim(engine){
+    SimBase.call(this, engine);
+    this.p = { m: 2, k: 10, A: 3, gamma: 0.2 };
+    this.y = 0; this.v = 0;
+    this._springMesh = null;
+    this._springBasePositions = null; // Store initial helix positions
+}
+SHMSim.prototype = Object.create(SimBase.prototype);
+SHMSim.prototype._setup = function(){
+    var ceil = this._add(new THREE.Mesh(new THREE.BoxGeometry(4,0.5,2), new THREE.MeshStandardMaterial({color:0x1e2e50})));
+    ceil.position.y = 6; 
+    this._mass = this._add(new THREE.Mesh(new THREE.BoxGeometry(1.5,1.5,1.5), new THREE.MeshStandardMaterial({color:0x63caff})));
+    this._mass.castShadow = true;
+    this._vArr = this._add(new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), 1, 0xa8ff78));
+    this.camera.position.set(0,2,15);
+    
+    // Create High Quality Spring (Tube with Triangle Cross Section)
+    this._createSpringMesh();
+    
+    document.getElementById('energy-container').style.display='block';
+    this._setupEnergyUI();
+};
+SHMSim.prototype._createSpringMesh = function(){
+    // Generate Helix Path
+    var pathPoints = [];
+    var height = 6; // Max length
+    var turns = 8;
+    var radius = 0.6;
+    for(var i=0; i<=100; i++){
+        var t = i/100;
+        var angle = t * TAU * turns;
+        var x = radius * Math.cos(angle);
+        var z = radius * Math.sin(angle);
+        var y = 6 - (t * height);
+        pathPoints.push(new THREE.Vector3(x, y, z));
+    }
+    var curve = new THREE.CatmullRomCurve3(pathPoints);
+    // TubeGeometry: path, tubularSegments, radius, radialSegments, closed
+    // radialSegments: 3 creates a TRIANGULAR cross section as requested
+    var geometry = new THREE.TubeGeometry(curve, 100, 0.15, 3, false);
+    var material = new THREE.MeshStandardMaterial({ color: 0x8899cc, metalness: 0.8, roughness: 0.2 });
+    this._springMesh = new THREE.Mesh(geometry, material);
+    this._add(this._springMesh);
+    
+    // Store base positions for stretching logic
+    this._springBasePositions = geometry.attributes.position.array.slice();
+};
+SHMSim.prototype._setupEnergyUI = function(){
+    document.getElementById('energy-container').innerHTML = 
+    '<div class="energy-row"><span class="energy-label" style="color:var(--accent-lime)">KE</span><div class="energy-track"><div class="energy-fill" id="ke-fill" style="background:var(--accent-lime)"></div></div><span class="energy-val" id="ke-val">0</span></div>'+
+    '<div class="energy-row"><span class="energy-label" style="color:var(--accent-orange)">PE</span><div class="energy-track"><div class="energy-fill" id="pe-fill" style="background:var(--accent-orange)"></div></div><span class="energy-val" id="pe-val">0</span></div>'+
+    '<div class="energy-row"><span class="energy-label" style="color:var(--accent-cyan)">Tot</span><div class="energy-track"><div class="energy-fill" id="et-fill" style="background:var(--accent-cyan)"></div></div><span class="energy-val" id="et-val">0</span></div>';
+};
+SHMSim.prototype.reset = function(){ this._st = 0; this.y = this.p.A; this.v = 0; };
+SHMSim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: 'Damped Oscillator', container: document.getElementById('gui-container'), width: 300 });
+    this.gui.add(this.p, 'm', 0.5, 10, 0.5).name('Mass (kg)');
+    this.gui.add(this.p, 'k', 1, 50, 1).name('Spring k (N/m)');
+    this.gui.add(this.p, 'A', 0.5, 5, 0.1).name('Amplitude (m)').onChange(()=>this.reset());
+    this.gui.add(this.p, 'gamma', 0, 1, 0.01).name('Damping');
+    this.gui.add({r:()=>this.reset()}, 'r').name('Reset');
+};
+SHMSim.prototype.update = function(t, dt){
+    if(this._st===0) this.reset();
+    SimBase.prototype.update.call(this, t, dt);
+    var F_spring = -this.p.k * this.y;
+    var F_damp = -2 * this.p.m * this.p.gamma * this.v;
+    var a = (F_spring + F_damp) / this.p.m;
+    this.v += a * dt;
+    this.y += this.v * dt;
+    this._mass.position.set(0, this.y, 0);
+    this._setArr(this._vArr, new THREE.Vector3(0,Math.sign(this.v),0), clamp(Math.abs(this.v)/5, 0.2, 3), this._mass.position);
+    
+    // STRETCH SPRING LOGIC (Vertex Manipulation)
+    // The spring goes from y=6 (pivot) to y=this.y+0.75 (top of mass)
+    var topY = 6;
+    var botY = this.y + 0.75;
+    var currentLen = topY - botY;
+    var initialLen = 6; // Defined in _createSpringMesh
+    var scale = currentLen / initialLen;
+    
+    if(this._springMesh && this._springBasePositions){
+        var posAttr = this._springMesh.geometry.attributes.position;
+        var arr = posAttr.array;
+        for(var i=0; i < arr.length; i+=3){
+            // Original X and Z
+            var ox = this._springBasePositions[i];
+            var oz = this._springBasePositions[i+2];
+            var oy = this._springBasePositions[i+1];
+            
+            // Scale Y relative to pivot (6)
+            // Distance from pivot in original config
+            var distFromPivot = 6 - oy;
+            var newY = 6 - (distFromPivot * scale);
+            
+            arr[i] = ox;
+            arr[i+1] = newY;
+            arr[i+2] = oz;
+        }
+        posAttr.needsUpdate = true;
+    }
+    
+    // Energy
+    var ke = 0.5 * this.p.m * this.v * this.v;
+    var pe = 0.5 * this.p.k * this.y * this.y;
+    var et = ke+pe;
+    var maxE = 0.5 * this.p.k * this.p.A * this.p.A;
+    document.getElementById('ke-fill').style.width = clamp(ke/maxE*100,0,100)+'%';
+    document.getElementById('pe-fill').style.width = clamp(pe/maxE*100,0,100)+'%';
+    document.getElementById('et-fill').style.width = clamp(et/maxE*100,0,100)+'%';
+    document.getElementById('ke-val').textContent = ke.toFixed(2)+' J';
+    document.getElementById('pe-val').textContent = pe.toFixed(2)+' J';
+    document.getElementById('et-val').textContent = et.toFixed(2)+' J';
+    
+    document.getElementById('overlay-text').innerHTML = 'High-fidelity spring visualization using volumetric tube geometry.';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block">ω₀ = √(k/m) = '+(Math.sqrt(this.p.k/this.p.m)).toFixed(2)+'</div>';
+};
+
+/* ================= 3. PROJECTILE (WITH DRAG) ================= */
+function ProjSim(engine){
+    SimBase.call(this, engine);
+    this.p = { v0: 30, angle: 45, g: 9.81, h0: 0, Cd: 0.0, mass: 1.0, area: 0.1 };
+    this.state = 'ready'; 
+    this.pos = new THREE.Vector3(); this.vel = new THREE.Vector3();
+    this.trail = []; this.MAXTRAIL = 500;
+}
+ProjSim.prototype = Object.create(SimBase.prototype);
+ProjSim.prototype._setup = function(){
+    var grid = new THREE.GridHelper(60, 60, 0x1a2a4a, 0x111a2e); grid.position.y=-0.1; this._add(grid);
+    this._proj = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshStandardMaterial({ color: 0xff9f45, emissive: 0x552200, emissiveIntensity: 0.4 })));
+    this._tGeo = new THREE.BufferGeometry(); this._tGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.MAXTRAIL*3), 3));
+    this._tLine = this._add(new THREE.Line(this._tGeo, new THREE.LineBasicMaterial({ color: 0xff9f45, transparent: true, opacity: 0.5 })));
+    this._vArr = this._add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0), 2, 0xa8ff78));
+    this.camera.position.set(0, 10, 40); this.engine.orbit.target.set(20, 5, 0);
+};
+ProjSim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: 'Projectile (w/ Drag)', container: document.getElementById('gui-container'), width: 300 });
+    var fInit = this.gui.addFolder('Initial'); fInit.add(this.p, 'v0', 1, 100, 1).name('Speed (m/s)'); fInit.add(this.p, 'angle', 0, 90, 1).name('Angle (deg)'); fInit.add(this.p, 'h0', 0, 50, 1).name('Height (m)'); fInit.open();
+    var fEnv = this.gui.addFolder('Environment'); fEnv.add(this.p, 'g', 1, 20, 0.1).name('Gravity'); fEnv.add(this.p, 'Cd', 0.0, 1.0, 0.01).name('Drag Coeff'); fEnv.add(this.p, 'mass', 0.1, 10, 0.1).name('Mass'); fEnv.open();
+    var o = { Launch: function(){ self._launch(); }, Reset: function(){ self.state='ready'; self.trail=[]; self._tGeo.setDrawRange(0,0); } };
+    this.gui.add(o, 'Launch').name('FIRE'); this.gui.add(o, 'Reset').name('RESET');
+};
+ProjSim.prototype._launch = function(){
+    this.state = 'flying';
+    var rad = this.p.angle * PI / 180;
+    this.pos.set(0, this.p.h0, 0);
+    this.vel.set(this.p.v0 * Math.cos(rad), this.p.v0 * Math.sin(rad), 0);
+    this.trail = []; this._tGeo.setDrawRange(0,0);
+};
+ProjSim.prototype.update = function(t, dt){
+    if(this.state === 'ready'){
+        var rad = this.p.angle * PI / 180;
+        this._proj.position.set(0, this.p.h0, 0);
+        this._setArr(this._vArr, new THREE.Vector3(Math.cos(rad), Math.sin(rad), 0).normalize(), 2, this._proj.position);
+        return;
+    }
+    if(this.state === 'landed') return;
+    SimBase.prototype.update.call(this, t, dt);
+    var rho = 1.225;
+    var vSq = this.vel.lengthSq();
+    var vMag = Math.sqrt(vSq);
+    var dragMag = 0.5 * rho * vSq * this.p.Cd * this.p.area;
+    var F_drag = this.vel.clone().normalize().multiplyScalar(-dragMag);
+    var F_grav = new THREE.Vector3(0, -this.p.mass * this.p.g, 0);
+    var F_net = new THREE.Vector3().addVectors(F_drag, F_grav);
+    var acc = F_net.divideScalar(this.p.mass);
+    this.vel.add(acc.multiplyScalar(dt));
+    this.pos.add(this.vel.clone().multiplyScalar(dt));
+    this._proj.position.copy(this.pos);
+    this._setArr(this._vArr, this.vel.clone().normalize(), clamp(vMag/10, 0.5, 4), this.pos);
+    if(this.pos.y <= 0 && this.vel.y < 0){ this.pos.y = 0; this.state = 'landed'; }
+    this.trail.push(this.pos.clone());
+    if(this.trail.length > this.MAXTRAIL) this.trail.shift();
+    var tp = this._tLine.geometry.attributes.position.array;
+    for(var i=0; i<this.trail.length; i++){ tp[i*3]=this.trail[i].x; tp[i*3+1]=this.trail[i].y; tp[i*3+2]=this.trail[i].z; }
+    this._tGeo.setDrawRange(0, this.trail.length); this._tGeo.attributes.position.needsUpdate = true;
+    document.getElementById('overlay-text').innerHTML = 'Trajectory calculated using numerical integration with air resistance.';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block">Drag: Fd = ½ρv²CdA</div>';
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'t',v:this._st.toFixed(2)},{l:'x',v:this.pos.x.toFixed(1)},{l:'y',v:this.pos.y.toFixed(1)},{l:'v',v:vMag.toFixed(1)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= 4. PENDULUM (LARGE ANGLE) ================= */
+function PendulumSim(engine){
+    SimBase.call(this, engine);
+    this.p = { L: 5, g: 9.81, m: 1, theta0: PI/4, damping: 0.05 };
+    this.theta = 0; this.omega = 0;
+    this.trail = []; this.MAXTRAIL = 200;
+}
+PendulumSim.prototype = Object.create(SimBase.prototype);
+PendulumSim.prototype._setup = function(){
+    this._pivot = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshStandardMaterial({color:0x556677})));
+    this._pivot.position.set(0, 6, 0);
+    this._rod = this._add(this._line([new THREE.Vector3(0,6,0), new THREE.Vector3(0,0,0)], 0xffffff, 2));
+    this._bob = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0xff9f45, metalness:0.7, roughness:0.2})));
+    this._trailGeo = new THREE.BufferGeometry(); this._trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.MAXTRAIL*3), 3));
+    this._trailLine = this._add(new THREE.Line(this._trailGeo, new THREE.LineBasicMaterial({color:0xff9f45, transparent:true, opacity:0.3})));
+    this.camera.position.set(0, 4, 18); this.engine.orbit.target.set(0, 3, 0);
+};
+PendulumSim.prototype.reset = function(){
+    this._st = 0; this.theta = this.p.theta0; this.omega = 0; this.trail = []; this._trailGeo.setDrawRange(0,0);
+};
+PendulumSim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: 'Simple Pendulum', container: document.getElementById('gui-container'), width: 300 });
+    this.gui.add(this.p, 'L', 1, 8, 0.1).name('Length (m)').onChange(()=>this.reset());
+    this.gui.add(this.p, 'theta0', 0.1, PI-0.1, 0.1).name('Init Angle (rad)').onChange(()=>this.reset());
+    this.gui.add(this.p, 'g', 1, 20, 0.1).name('Gravity (m/s²)');
+    this.gui.add(this.p, 'damping', 0, 0.5, 0.001).name('Air Drag');
+    this.gui.add({reset:()=>this.reset()}, 'reset').name('Reset Sim');
+};
+PendulumSim.prototype.update = function(t, dt){
+    if(this._st===0) this.reset();
+    SimBase.prototype.update.call(this, t, dt);
+    var alpha = -(this.p.g / this.p.L) * Math.sin(this.theta) - (this.p.damping * this.omega);
+    this.omega += alpha * dt;
+    this.theta += this.omega * dt;
+    var x = this.p.L * Math.sin(this.theta), y = 6 - this.p.L * Math.cos(this.theta);
+    this._bob.position.set(x, y, 0);
+    this._rod.geometry.setFromPoints([new THREE.Vector3(0,6,0), this._bob.position]);
+    var T0 = 2 * PI * Math.sqrt(this.p.L / this.p.g);
+    var T_real = T0 * (1 + (this.p.theta0*this.p.theta0)/16);
+    document.getElementById('overlay-text').innerHTML = 'Simple gravity pendulum. Note: Period increases with Amplitude.';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block">Period (Large Angle):<br>T ≈ '+(T_real).toFixed(2)+' s</div>';
+    this.trail.push(this._bob.position.clone());
+    if(this.trail.length > this.MAXTRAIL) this.trail.shift();
+    var tp = this._trailGeo.attributes.position.array;
+    for(var i=0; i<this.trail.length; i++){ tp[i*3]=this.trail[i].x; tp[i*3+1]=this.trail[i].y; tp[i*3+2]=this.trail[i].z; }
+    this._trailGeo.setDrawRange(0, this.trail.length); this._trailGeo.attributes.position.needsUpdate = true;
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'θ',v:this.theta.toFixed(2)},{l:'ω',v:this.omega.toFixed(2)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= 5. CIRCULAR MOTION (FIXED "NOTHING" BUG) ================= */
+function CircSim(engine){
+    SimBase.call(this, engine);
+    this.p = { r: 8, omega: 1.0, m: 1 };
+}
+CircSim.prototype = Object.create(SimBase.prototype);
+CircSim.prototype._setup = function(){
+    this._add(new THREE.GridHelper(30,30,0x1a2a4a,0x111a2e));
+    this._ring = this._add(this._line([new THREE.Vector3(0,0,0)], 0x223355));
+    this._particle = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshStandardMaterial({color:0x63caff})));
+    this._vArr = this._add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0), 2, 0xa8ff78));
+    this._aArr = this._add(new THREE.ArrowHelper(new THREE.Vector3(-1,0,0), new THREE.Vector3(0,0,0), 2, 0xff9f45));
+    this.camera.position.set(0,15,20);
+    this._updRing(); // Init ring
+};
+CircSim.prototype._updRing = function(){
+    var pts=[]; for(var i=0;i<=64;i++){var a=i/64*TAU; pts.push(new THREE.Vector3(this.p.r*Math.cos(a),0,this.p.r*Math.sin(a)));} this._ring.geometry.setFromPoints(pts);
+};
+CircSim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: 'Circular Motion', container: document.getElementById('gui-container'), width: 300 });
+    this.gui.add(this.p, 'r', 2, 15, 0.5).name('Radius (m)').onChange(()=>this._updRing());
+    this.gui.add(this.p, 'omega', 0.1, 5, 0.1).name('Ang. Vel (rad/s)');
+    this.gui.add(this.p, 'm', 0.1, 10, 0.1).name('Mass (kg)');
+};
+CircSim.prototype.update = function(t, dt){
+    SimBase.prototype.update.call(this, t, dt);
+    var th = this.p.omega * this._st;
+    var x = this.p.r * Math.cos(th), z = this.p.r * Math.sin(th);
+    this._particle.position.set(x, 0, z);
+    var v = this.p.r * this.p.omega;
+    var a = this.p.omega * this.p.omega * this.p.r;
+    this._setArr(this._vArr, new THREE.Vector3(-Math.sin(th),0,Math.cos(th)), clamp(v/5,0.5,3), this._particle.position);
+    this._setArr(this._aArr, new THREE.Vector3(-Math.cos(th),0,-Math.sin(th)), clamp(a/5,0.5,3), this._particle.position);
+    document.getElementById('overlay-text').innerHTML = 'Uniform Circular Motion. Velocity is tangent, Acceleration is centripetal.';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block">a_c = v²/r = ω²r</div>';
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'v',v:v.toFixed(2)},{l:'a_c',v:a.toFixed(2)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= 6. COLLISION ================= */
+function CollSim(engine){
+    SimBase.call(this, engine);
+    this.p = { m1: 3, v1: 5, m2: 2, v2: -3, e: 1 };
+    this.state = 'idle';
+    this.x1 = -10; this.x2 = 10;
+}
+CollSim.prototype = Object.create(SimBase.prototype);
+CollSim.prototype._setup = function(){
+    this._add(new THREE.GridHelper(40,40,0x1a2a4a,0x111a2e));
+    this._s1 = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshStandardMaterial({color:0x63caff})));
+    this._s2 = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0xff9f45})));
+    document.getElementById('momentum-container').style.display='block';
+    document.getElementById('momentum-container').innerHTML = 
+    '<div class="energy-row"><span class="energy-label" style="color:var(--accent-cyan)">p</span><div class="energy-track"><div class="energy-fill" id="p-fill" style="background:var(--accent-cyan);width:50%"></div></div><span class="energy-val" id="p-val">0</span></div>'+
+    '<div class="energy-row"><span class="energy-label" style="color:var(--accent-lime)">KE</span><div class="energy-track"><div class="energy-fill" id="cke-fill" style="background:var(--accent-lime);width:50%"></div></div><span class="energy-val" id="cke-val">0</span></div>';
+};
+CollSim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: '1D Collision', container: document.getElementById('gui-container'), width: 300 });
+    var f1 = this.gui.addFolder('Object 1'); f1.add(this.p, 'm1', 0.1, 10, 0.1).name('Mass'); f1.add(this.p, 'v1', -10, 10, 0.5).name('Vel'); f1.open();
+    var f2 = this.gui.addFolder('Object 2'); f2.add(this.p, 'm2', 0.1, 10, 0.1).name('Mass'); f2.add(this.p, 'v2', -10, 10, 0.5).name('Vel'); f2.open();
+    this.gui.add(this.p, 'e', 0, 1, 0.01).name('Restitution');
+    this.gui.add({start:()=>{this.state='running';this._st=0;this.x1=-10;this.x2=10;}, reset:()=>{this.state='idle';this.x1=-10;this.x2=10;}}, 'start').name('Start');
+};
+CollSim.prototype.update = function(t, dt){
+    SimBase.prototype.update.call(this, dt);
+    if(this.state==='idle'){ this._s1.position.x=this.x1; this._s2.position.x=this.x2; return; }
+    if(this.state==='done') return;
+    this.x1 += this.p.v1 * dt; this.x2 += this.p.v2 * dt;
+    this._s1.position.x = this.x1; this._s2.position.x = this.x2;
+    if(Math.abs(this.x1 - this.x2) <= 1.1 && this.p.v1 > this.p.v2){
+        var v1 = this.p.v1, v2 = this.p.v2, m1 = this.p.m1, m2 = this.p.m2, e = this.p.e;
+        var v1f = (m1*v1 + m2*v2 - m2*e*(v1-v2))/(m1+m2);
+        var v2f = (m1*v1 + m2*v2 + m1*e*(v1-v2))/(m1+m2);
+        this.p.v1 = v1f; this.p.v2 = v2f; this.state='done';
+        var pi = m1*v1+m2*v2, pf = m1*v1f+m2*v2f;
+        var kei = 0.5*m1*v1*v1 + 0.5*m2*v2*v2;
+        var kef = 0.5*m1*v1f*v1f + 0.5*m2*v2f*v2f;
+        document.getElementById('p-fill').style.width = '100%'; document.getElementById('p-val').textContent = pf.toFixed(1);
+        document.getElementById('cke-fill').style.width = clamp(kef/(kei+0.001)*100,0,100)+'%'; document.getElementById('cke-val').textContent = kef.toFixed(1);
+        document.getElementById('overlay-text').innerHTML = 'Collision Complete. Momentum Conserved.';
+        document.getElementById('formula-container').innerHTML = '<div class="formula-block">p_initial = '+pi.toFixed(1)+'</div>';
+    }
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'x1',v:this.x1.toFixed(1)},{l:'x2',v:this.x2.toFixed(1)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= 7. ORBITAL (VERLET) ================= */
+function GravitySim(engine){
+    SimBase.call(this, engine);
+    this.p = { G: 10, m1: 500, m2: 10, r: 12 };
+    this.r1 = new THREE.Vector3(); this.v1 = new THREE.Vector3();
+    this.r2 = new THREE.Vector3(); this.v2 = new THREE.Vector3();
+    this.a1 = new THREE.Vector3(); this.a2 = new THREE.Vector3();
+    this.trail = []; this.MAXTRAIL = 500;
+}
+GravitySim.prototype = Object.create(SimBase.prototype);
+GravitySim.prototype._setup = function(){
+    this._sun = this._add(new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshStandardMaterial({color:0xffaa00, emissive:0xff4400, emissiveIntensity:0.8})));
+    this._planet = this._add(new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0x00aaff})));
+    this._trailGeo = new THREE.BufferGeometry(); this._trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.MAXTRAIL*3), 3));
+    this._trailLine = this._add(new THREE.Line(this._trailGeo, new THREE.LineBasicMaterial({color:0x00aaff, transparent:true, opacity:0.4})));
+    this.camera.position.set(0, 20, 40); this.engine.orbit.target.set(0,0,0);
+    this.reset();
+};
+GravitySim.prototype.reset = function(){
+    this._st = 0; this.trail = [];
+    var v_circ = Math.sqrt(this.p.G * this.p.m1 / this.p.r);
+    this.r1.set(0,0,0); this.r2.set(this.p.r, 0, 0);
+    this.v1.set(0,0,0); this.v2.set(0, 0, v_circ);
+    this._updateAccels();
+    this._sun.scale.setScalar(Math.pow(this.p.m1, 1/3) * 0.15);
+    this._planet.scale.setScalar(Math.pow(this.p.m2, 1/3) * 0.3);
+};
+GravitySim.prototype._updateAccels = function(){
+    var d = new THREE.Vector3().subVectors(this.r2, this.r1);
+    var dist = d.length(); if(dist < 1) dist = 1;
+    var fMag = (this.p.G * this.p.m1 * this.p.m2) / (dist * dist);
+    var fDir = d.normalize();
+    var F1 = fDir.clone().multiplyScalar(fMag);
+    var F2 = fDir.clone().multiplyScalar(-fMag);
+    this.a1.copy(F1.divideScalar(this.p.m1));
+    this.a2.copy(F2.divideScalar(this.p.m2));
+};
+GravitySim.prototype._buildGui = function(){
+    var self = this;
+    this.gui = new lil.GUI({ title: '2-Body Orbit (Verlet)', container: document.getElementById('gui-container'), width: 300 });
+    this.gui.add(this.p, 'G', 1, 50, 1).name('G Constant');
+    this.gui.add(this.p, 'm1', 100, 1000, 10).name('Star Mass').onChange(()=>this.reset());
+    this.gui.add(this.p, 'm2', 1, 50, 1).name('Planet Mass').onChange(()=>this.reset());
+    this.gui.add(this.p, 'r', 5, 30, 1).name('Distance').onChange(()=>this.reset());
+    this.gui.add({reset:()=>this.reset()}, 'reset').name('Reset Orbit');
+};
+GravitySim.prototype.update = function(t, dt){
+    SimBase.prototype.update.call(this, dt);
+    var dt2 = dt * dt;
+    this.r1.add(this.v1.clone().multiplyScalar(dt)).add(this.a1.clone().multiplyScalar(0.5 * dt2));
+    this.r2.add(this.v2.clone().multiplyScalar(dt)).add(this.a2.clone().multiplyScalar(0.5 * dt2));
+    var a1_old = this.a1.clone();
+    var a2_old = this.a2.clone();
+    this._updateAccels();
+    this.v1.add(a1_old.add(this.a1).multiplyScalar(0.5 * dt));
+    this.v2.add(a2_old.add(this.a2).multiplyScalar(0.5 * dt));
+    this._sun.position.copy(this.r1);
+    this._planet.position.copy(this.r2);
+    this.trail.push(this.r2.clone());
+    if(this.trail.length > this.MAXTRAIL) this.trail.shift();
+    var tp = this._trailGeo.attributes.position.array;
+    for(var i=0; i<this.trail.length; i++){ tp[i*3]=this.trail[i].x; tp[i*3+1]=this.trail[i].y; tp[i*3+2]=this.trail[i].z; }
+    this._trailGeo.setDrawRange(0, this.trail.length); this._trailGeo.attributes.position.needsUpdate = true;
+    var v = this.v2.length(), r = this.r1.distanceTo(this.r2);
+    document.getElementById('overlay-text').innerHTML = 'Using Velocity Verlet integration for symplectic energy conservation.';
+    document.getElementById('formula-container').innerHTML = '<div class="formula-block">r = '+r.toFixed(1)+' m<br>v = '+v.toFixed(1)+' m/s</div>';
+    var lv = document.getElementById('live-values');
+    lv.innerHTML = [{l:'Separation',v:r.toFixed(1)},{l:'Velocity',v:v.toFixed(1)}].map(c=>'<div class="live-chip">'+c.l+': <span>'+c.v+'</span></div>').join('');
+};
+
+/* ================= GLOBAL ================= */
+var _engine, _curKey='wave';
+var SIMS = {
+    wave: { Cls: WaveSim, title: 'Wave Superposition', sub: 'Physics: v = fλ', btn: 'btn-wave' },
+    shm: { Cls: SHMSim, title: 'Spring-Mass System', sub: 'High-Fidelity Spring', btn: 'btn-shm' },
+    pendulum: { Cls: PendulumSim, title: 'Simple Pendulum', sub: 'Large Angle Physics', btn: 'btn-pendulum' },
+    proj: { Cls: ProjSim, title: 'Projectile Motion', sub: 'With Air Resistance', btn: 'btn-proj' },
+    circular: { Cls: CircSim, title: 'Circular Motion', sub: 'Centripetal Force', btn: 'btn-circ' },
+    collision: { Cls: CollSim, title: 'Elastic Collisions', sub: 'Momentum Conservation', btn: 'btn-coll' },
+    gravity: { Cls: GravitySim, title: 'Orbital Mechanics', sub: '2-Body Gravity (Verlet)', btn: 'btn-gravity' }
+};
+var SIM_KEYS = Object.keys(SIMS);
+
+function init(){
+    _engine = new LabEngine('canvas-container');
+    _engine.start();
+    switchSim('wave');
+}
+
+window.switchSim = function(key){
+    if(!SIMS[key] || key===_curKey) return;
+    document.getElementById('transition-overlay').classList.add('active');
+    setTimeout(function(){
+        var meta = SIMS[key];
+        _engine.loadSim(new meta.Cls(_engine));
+        _curKey = key;
+        document.getElementById('sim-title').textContent = meta.title;
+        document.getElementById('sim-subtitle').textContent = meta.sub;
+        SIM_KEYS.forEach(k => document.getElementById(SIMS[k].btn).classList.remove('active'));
+        document.getElementById(meta.btn).classList.add('active');
+        document.getElementById('transition-overlay').classList.remove('active');
+        document.getElementById('overlay-text').innerHTML = '';
+        document.getElementById('formula-container').innerHTML = '';
+        document.getElementById('live-values').innerHTML = '';
+    }, 400);
+};
+
+function toggleOverlay(){
+    var el = document.getElementById('info-overlay');
+    el.classList.toggle('hidden');
+}
+
+window.addEventListener('keydown', function(e){
+    if(e.key===' '){ e.preventDefault(); if(_engine.activeSim) _engine.activeSim.togglePause(); }
+    else if(e.key==='h' || e.key==='H'){ toggleOverlay(); }
+    else if(e.key==='r' || e.key==='R'){ e.preventDefault(); if(_engine.activeSim && _engine.activeSim.reset) _engine.activeSim.reset(); }
+});
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
